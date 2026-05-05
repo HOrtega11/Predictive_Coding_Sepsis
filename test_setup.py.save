@@ -1,0 +1,12 @@
+import torch
+import pandas as pd
+import numpy as np
+
+print("PyTorch:", torch.__version__)
+print("CUDA available:", torch.cuda.is_available())
+print("pandas:", pd.__version__)
+print("numpy:", np.__version__)
+
+x = torch.randn(4, 10, 5)
+print("Dummy vital-sign batch shape:", x.shape)
+

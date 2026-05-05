@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+data/raw/
+data/processed/
+outputs/checkpoints/
+outputs/plots/
+outputs/tables/
+outputs/metrics/
+
+*.zip
+*.pt
+*.pkl
