@@ -1,4 +1,3 @@
-
 import warnings
 from pathlib import Path
 
@@ -28,12 +27,71 @@ OUTPUT_PATH = "outputs/metrics/arima_windowed_results.csv"
 
 
 def load_dataset(path):
+    """
+    Load a processed dataset split from CSV.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Path to the processed CSV file.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Loaded dataset with charttime converted to datetime format.
+    """
+
     df = pd.read_csv(path)
     df["charttime"] = pd.to_datetime(df["charttime"])
     return df
 
 
 def predict_patient_windowed(model, patient_df, vital_columns, window_size, horizon):
+    """
+    Generate fixed-window ARIMA predictions for one ICU stay.
+
+    Parameters
+    ----------
+    model : ARIMABaseline
+        ARIMA baseline object used to forecast each vital sign independently.
+
+    patient_df : pandas.DataFrame
+        DataFrame containing one ICU stay's time-ordered vital-sign records.
+
+    vital_columns : list of str
+        Names of the vital-sign columns to forecast.
+
+    window_size : int
+        Number of past time steps used as ARIMA history.
+
+    horizon : int
+        Number of future time steps to forecast.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        preds : np.ndarray
+            Predicted vital signs with shape
+            (num_windows, num_vitals).
+
+        targets : np.ndarray
+            True future vital signs with shape
+            (num_windows, num_vitals).
+
+        last_inputs : np.ndarray
+            Last observed input values before prediction, used for
+            directional accuracy.
+
+    Notes
+    -----
+    For each prediction point i:
+    - history = data[i - window_size + 1 : i + 1]
+    - target = data[i + horizon]
+    - last input = data[i]
+
+    This makes ARIMA directly comparable to GRU and PC-GRU windowed inputs.
+    """
+
     preds = []
     targets = []
     last_inputs = []
@@ -63,6 +121,23 @@ def predict_patient_windowed(model, patient_df, vital_columns, window_size, hori
 
 
 def run_arima_windowed(window_size, horizon):
+    """
+    Evaluate windowed ARIMA for one window-size / horizon setting.
+
+    Parameters
+    ----------
+    window_size : int
+        Number of past hours used as input history.
+
+    horizon : int
+        Number of hours ahead to forecast.
+
+    Returns
+    -------
+    dict
+        Validation metrics for the specified ARIMA-windowed configuration.
+    """
+
     val_df = load_dataset(VAL_DATA_PATH)
 
     model = ARIMABaseline(order=ARIMA_ORDER)
@@ -113,6 +188,14 @@ def run_arima_windowed(window_size, horizon):
 
 
 def main():
+    """
+    Run windowed ARIMA evaluation across all configured settings.
+
+    Results are saved to:
+
+    outputs/metrics/arima_windowed_results.csv
+    """
+
     warnings.filterwarnings("ignore")
 
     all_results = []

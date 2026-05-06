@@ -1,4 +1,3 @@
-
 import random
 from pathlib import Path
 
@@ -37,6 +36,15 @@ from src.evaluation.metrics import (
 
 
 def set_seed(seed):
+    """
+    Set random seeds for reproducible training.
+
+    Parameters
+    ----------
+    seed : int
+        Seed value used for Python, NumPy, and PyTorch.
+    """
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -46,12 +54,44 @@ def set_seed(seed):
 
 
 def load_dataset(path):
+    """
+    Load a processed dataset split from CSV.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Path to a processed CSV file.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Loaded dataset with charttime converted to datetime.
+    """
+
     df = pd.read_csv(path)
     df["charttime"] = pd.to_datetime(df["charttime"])
     return df
 
 
 def save_scatter_plot(preds, targets, window_size, prediction_horizon):
+    """
+    Save a validation scatter plot of predicted versus true values.
+
+    Parameters
+    ----------
+    preds : torch.Tensor
+        Model predictions.
+
+    targets : torch.Tensor
+        True target values.
+
+    window_size : int
+        Input window size in hours.
+
+    prediction_horizon : int
+        Forecast horizon in hours.
+    """
+
     import matplotlib.pyplot as plt
 
     preds_np = preds.detach().cpu().numpy().flatten()
@@ -70,6 +110,21 @@ def save_scatter_plot(preds, targets, window_size, prediction_horizon):
 
 
 def save_checkpoint(model, window_size, prediction_horizon):
+    """
+    Save the best GRU model checkpoint for one experimental setting.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        GRU model to save.
+
+    window_size : int
+        Input window size in hours.
+
+    prediction_horizon : int
+        Forecast horizon in hours.
+    """
+
     checkpoint_dir = Path("outputs/checkpoints")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -81,6 +136,23 @@ def save_checkpoint(model, window_size, prediction_horizon):
 
 
 def train_gru_for_setting(window_size, prediction_horizon):
+    """
+    Train and validate the GRU baseline for one configuration.
+
+    Parameters
+    ----------
+    window_size : int
+        Number of past hours used as input.
+
+    prediction_horizon : int
+        Number of hours ahead to predict.
+
+    Returns
+    -------
+    list of dict
+        Per-epoch training and validation metrics.
+    """
+
     set_seed(SEED)
 
     train_df = load_dataset("data/processed/splits/train.csv")
@@ -204,6 +276,12 @@ def train_gru_for_setting(window_size, prediction_horizon):
 
 
 def main():
+    """
+    Train the GRU baseline across all window sizes and prediction horizons.
+
+    Saves all per-epoch results to outputs/metrics/gru_results.csv.
+    """
+
     all_results = []
 
     for window_size in WINDOW_SIZES:

@@ -1,4 +1,3 @@
-
 import random
 from pathlib import Path
 
@@ -37,23 +36,73 @@ from src.evaluation.metrics import (
 
 
 def set_seed(seed):
+    """
+    Set random seeds for reproducibility.
+
+    Parameters
+    ----------
+    seed : int
+        Random seed used for Python, NumPy, and PyTorch.
+    """
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    # Set CUDA seeds when a GPU is available.
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
 
 def load_dataset(path):
+    """
+    Load a processed split CSV file.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Path to the CSV file.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Loaded dataset with charttime converted to datetime format.
+    """
+
     df = pd.read_csv(path)
+
+    # Ensure charttime is treated as a timestamp rather than plain text.
     df["charttime"] = pd.to_datetime(df["charttime"])
+
     return df
 
 
 def save_scatter_plot(preds, targets, window_size, prediction_horizon):
+    """
+    Save a validation scatter plot of predicted versus true values.
+
+    Parameters
+    ----------
+    preds : torch.Tensor
+        Model predictions from the validation set.
+
+    targets : torch.Tensor
+        True target values from the validation set.
+
+    window_size : int
+        Input window size in hours.
+
+    prediction_horizon : int
+        Prediction horizon in hours.
+
+    Notes
+    -----
+    The plot is saved to outputs/plots/.
+    """
+
     import matplotlib.pyplot as plt
 
+    # Convert tensors to flattened NumPy arrays for plotting.
     preds_np = preds.detach().cpu().numpy().flatten()
     targets_np = targets.detach().cpu().numpy().flatten()
 
@@ -70,6 +119,25 @@ def save_scatter_plot(preds, targets, window_size, prediction_horizon):
 
 
 def save_checkpoint(model, window_size, prediction_horizon):
+    """
+    Save the current PC-GRU model weights.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        Trained PC-GRU model.
+
+    window_size : int
+        Input window size in hours.
+
+    prediction_horizon : int
+        Prediction horizon in hours.
+
+    Notes
+    -----
+    A separate checkpoint is saved for each window-size and horizon setting.
+    """
+
     checkpoint_dir = Path("outputs/checkpoints")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -81,11 +149,41 @@ def save_checkpoint(model, window_size, prediction_horizon):
 
 
 def train_pc_gru_for_setting(window_size, prediction_horizon):
+    """
+    Train and evaluate PC-GRU for one window-size / horizon configuration.
+
+    Parameters
+    ----------
+    window_size : int
+        Length of the input sequence in hours.
+
+    prediction_horizon : int
+        Number of hours ahead to predict.
+
+    Returns
+    -------
+    list of dict
+        Per-epoch training and validation results. Each dictionary contains
+        loss values and evaluation metrics for one epoch.
+
+    Process
+    -------
+    1. Load train and validation splits.
+    2. Build windowed datasets.
+    3. Initialize the PC-GRU model.
+    4. Train for multiple epochs.
+    5. Evaluate on validation data after each epoch.
+    6. Save the best checkpoint based on validation loss.
+    7. Stop early if validation loss stops improving.
+    """
+
     set_seed(SEED)
 
+    # Load preprocessed patient-level train/validation splits.
     train_df = load_dataset("data/processed/splits/train.csv")
     val_df = load_dataset("data/processed/splits/val.csv")
 
+    # Construct fixed-length input windows and horizon-specific targets.
     train_dataset = VitalWindowDataset(
         dataframe=train_df,
         vital_columns=VITAL_COLUMNS,
@@ -100,11 +198,13 @@ def train_pc_gru_for_setting(window_size, prediction_horizon):
         prediction_horizon=prediction_horizon,
     )
 
+    # Dataloaders batch the windowed examples for training and validation.
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # Initialize predictive-coding-inspired GRU model.
     model = PredictiveCodingGRU(
         input_dim=INPUT_DIM,
         hidden_dim=HIDDEN_DIM,
@@ -119,16 +219,19 @@ def train_pc_gru_for_setting(window_size, prediction_horizon):
         weight_decay=WEIGHT_DECAY,
     )
 
+    # Forecasting is trained using mean squared error.
     loss_fn = torch.nn.MSELoss()
 
     results = []
 
+    # Track best validation loss for checkpointing and early stopping.
     best_val_loss = float("inf")
     best_preds = None
     best_targets = None
     epochs_without_improvement = 0
 
     for epoch in range(EPOCHS):
+        # Train model for one full pass over the training set.
         train_loss = train_one_epoch(
             model,
             train_loader,
@@ -137,6 +240,7 @@ def train_pc_gru_for_setting(window_size, prediction_horizon):
             device,
         )
 
+        # Evaluate model on validation set.
         val_loss, preds, targets, last_inputs = evaluate(
             model,
             val_loader,
@@ -144,6 +248,7 @@ def train_pc_gru_for_setting(window_size, prediction_horizon):
             device,
         )
 
+        # Compute validation metrics.
         epoch_mae = mae(preds, targets)
         epoch_rmse = rmse(preds, targets)
         epoch_pearson = pearson_corr(preds, targets)
@@ -161,6 +266,7 @@ def train_pc_gru_for_setting(window_size, prediction_horizon):
             f"Direction Acc={epoch_direction_acc:.4f}"
         )
 
+        # Store epoch-level results for later tables and plots.
         row = {
             "model": "PC-GRU",
             "window_size_hours": window_size,
@@ -174,9 +280,11 @@ def train_pc_gru_for_setting(window_size, prediction_horizon):
             "direction_accuracy": epoch_direction_acc,
         }
 
+        # Add per-vital-sign MAE metrics.
         row.update(epoch_per_variable_mae)
         results.append(row)
 
+        # Save checkpoint whenever validation loss improves enough.
         if val_loss < best_val_loss - MIN_DELTA:
             best_val_loss = val_loss
             best_preds = preds
@@ -191,6 +299,7 @@ def train_pc_gru_for_setting(window_size, prediction_horizon):
         else:
             epochs_without_improvement += 1
 
+        # Stop training if validation loss fails to improve for too long.
         if epochs_without_improvement >= EARLY_STOPPING_PATIENCE:
             print(
                 f"Early stopping at epoch {epoch + 1}. "
@@ -198,6 +307,7 @@ def train_pc_gru_for_setting(window_size, prediction_horizon):
             )
             break
 
+    # Save scatter plot using predictions from the best validation-loss epoch.
     if best_preds is not None and best_targets is not None:
         save_scatter_plot(best_preds, best_targets, window_size, prediction_horizon)
 
@@ -205,8 +315,17 @@ def train_pc_gru_for_setting(window_size, prediction_horizon):
 
 
 def main():
+    """
+    Train PC-GRU across all configured window sizes and prediction horizons.
+
+    Results from all experimental settings are saved to:
+
+    outputs/metrics/pc_gru_results.csv
+    """
+
     all_results = []
 
+    # Run full grid of window-size and prediction-horizon combinations.
     for window_size in WINDOW_SIZES:
         for prediction_horizon in PREDICTION_HORIZONS:
             results = train_pc_gru_for_setting(
@@ -218,6 +337,7 @@ def main():
     output_dir = Path("outputs/metrics")
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Save all per-epoch results for later aggregation and plotting.
     results_df = pd.DataFrame(all_results)
     results_df.to_csv(output_dir / "pc_gru_results.csv", index=False)
 
@@ -226,4 +346,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    

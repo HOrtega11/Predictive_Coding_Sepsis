@@ -1,29 +1,55 @@
-
 from pathlib import Path
 
 import pandas as pd
 import matplotlib.pyplot as plt
 
 
+# Directory structure for inputs and outputs
 METRICS_DIR = Path("outputs/metrics")
 PLOTS_DIR = Path("outputs/plots")
 TABLES_DIR = Path("outputs/tables")
 
+# Ensure output directories exist
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 TABLES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def load_final_epoch(path, model_name):
+    """
+    Load model results and select the best epoch per configuration.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Path to the CSV file containing model results.
+
+    model_name : str
+        Name of the model (e.g., "GRU", "PC-GRU").
+
+    Returns
+    -------
+    pandas.DataFrame
+        Filtered dataframe containing one row per
+        (model, window_size, horizon) combination.
+
+    Notes
+    -----
+    - If validation loss is available, the epoch with the lowest validation loss is selected.
+    - Otherwise, the final epoch is used.
+    """
+
     df = pd.read_csv(path)
 
     if "epoch" in df.columns:
         if "val_loss" in df.columns:
+            # Select epoch with minimum validation loss
             df = df.loc[
                 df.groupby(
                     ["model", "window_size_hours", "prediction_horizon_hours"]
                 )["val_loss"].idxmin()
             ]
         else:
+            # Fallback: select final epoch
             df = df.sort_values("epoch")
             df = df.groupby(
                 ["model", "window_size_hours", "prediction_horizon_hours"],
@@ -35,6 +61,20 @@ def load_final_epoch(path, model_name):
 
 
 def load_results():
+    """
+    Load and combine results from all available models.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Combined dataframe containing GRU, PC-GRU, and ARIMA results.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no result CSV files are found.
+    """
+
     dfs = []
 
     gru_path = METRICS_DIR / "gru_results.csv"
@@ -47,6 +87,7 @@ def load_results():
     if pc_path.exists():
         dfs.append(load_final_epoch(pc_path, "PC-GRU"))
 
+    # ARIMA does not have epochs, so load directly
     if arima_windowed_path.exists():
         dfs.append(pd.read_csv(arima_windowed_path))
 
@@ -57,6 +98,19 @@ def load_results():
 
 
 def make_summary_table(df):
+    """
+    Create and save a summary table of model performance.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Combined results dataframe.
+
+    Notes
+    -----
+    The table includes key metrics for all configurations.
+    """
+
     cols = [
         "model",
         "window_size_hours",
@@ -77,8 +131,23 @@ def make_summary_table(df):
 
 
 def make_best_model_table(df):
+    """
+    Identify the best model per metric and configuration.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Combined results dataframe.
+
+    Notes
+    -----
+    - MAE and RMSE are minimized.
+    - Pearson and directional accuracy are maximized.
+    """
+
     best_rows = []
 
+    # Metrics where lower is better
     for metric in ["mae", "rmse"]:
         best = df.loc[
             df.groupby(
@@ -88,6 +157,7 @@ def make_best_model_table(df):
         best["best_by"] = metric
         best_rows.append(best)
 
+    # Metrics where higher is better
     for metric in ["pearson", "direction_accuracy"]:
         best = df.loc[
             df.groupby(
@@ -117,6 +187,18 @@ def make_best_model_table(df):
 
 
 def plot_metric_by_horizon(df, metric):
+    """
+    Plot a metric as a function of prediction horizon.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Results dataframe.
+
+    metric : str
+        Metric to plot (e.g., "mae", "rmse").
+    """
+
     for window_size in sorted(df["window_size_hours"].unique()):
         subset = df[df["window_size_hours"] == window_size]
 
@@ -146,6 +228,18 @@ def plot_metric_by_horizon(df, metric):
 
 
 def plot_metric_by_window(df, metric):
+    """
+    Plot a metric as a function of input window size.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Results dataframe.
+
+    metric : str
+        Metric to plot.
+    """
+
     for horizon in sorted(df["prediction_horizon_hours"].unique()):
         subset = df[df["prediction_horizon_hours"] == horizon]
 
@@ -175,6 +269,15 @@ def plot_metric_by_window(df, metric):
 
 
 def make_per_variable_table(df):
+    """
+    Create a table of per-variable MAE values.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Results dataframe.
+    """
+
     variable_cols = [
         col for col in df.columns
         if col.startswith("mae_")
@@ -196,6 +299,21 @@ def make_per_variable_table(df):
 
 
 def plot_per_variable_mae(df, window_size=24, horizon=4):
+    """
+    Plot per-variable MAE as a bar chart for a specific configuration.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Results dataframe.
+
+    window_size : int
+        Input window size.
+
+    horizon : int
+        Prediction horizon.
+    """
+
     variable_cols = [
         col for col in df.columns
         if col.startswith("mae_")
@@ -229,6 +347,18 @@ def plot_per_variable_mae(df, window_size=24, horizon=4):
 
 
 def plot_loss_curves(csv_path, model_name):
+    """
+    Plot training and validation loss curves.
+
+    Parameters
+    ----------
+    csv_path : pathlib.Path
+        Path to the metrics CSV file.
+
+    model_name : str
+        Name of the model (e.g., "GRU", "PC-GRU").
+    """
+
     if not csv_path.exists():
         print(f"Skipping loss curves; missing {csv_path}")
         return
@@ -273,6 +403,18 @@ def plot_loss_curves(csv_path, model_name):
 
 
 def main():
+    """
+    Generate all result tables and plots.
+
+    Outputs
+    -------
+    Tables:
+        outputs/tables/
+
+    Plots:
+        outputs/plots/
+    """
+
     df = load_results()
 
     make_summary_table(df)
